@@ -1,43 +1,43 @@
-use rand::RngCore;
-use schnorr_fun::{frost::Nonce, musig::NonceKeyPair, Message, Signature};
-use secp256kfun::{
-    marker::{Public, Zero},
-    Scalar,
+use std::collections::BTreeMap;
+
+use frost_ed25519::{
+    Signature, Identifier,
+    round1::SigningCommitments,
+    round2::SignatureShare,
 };
 
-/// A Threshold Signature Scheme to be used with ROAST
-pub trait ThresholdScheme<K> {
-    /// The scheme must implement a way for signers to generate nonces
-    fn gen_nonce<R: RngCore>(&self, nonce_rng: &mut R) -> NonceKeyPair;
+/// A trait for threshold signature schemes
+pub trait ThresholdScheme<PK> {
+    /// Generate a new nonce for signing
+   // fn gen_nonce<R: RngCore + CryptoRng>(&self, nonce_rng: &mut R) -> SigningKey;
 
-    /// The scheme must implement a way for signers to sign signature shares
-    fn sign(
-        &self,
-        joint_key: K,
-        nonces: Vec<(usize, Nonce)>,
-        my_index: usize,
-        secret_share: &Scalar,
-        secret_nonce: NonceKeyPair,
-        message: Message,
-    ) -> Scalar<Public, Zero>;
+    /// Sign a message using a threshold signature scheme
+    // fn sign(
+    //     &self,
+    //     joint_key: PK,
+    //     nonces: Vec<(Identifier, VerifyingKey)>,
+    //     my_identifier: Identifier,
+    //     secret_share: &frost_ed25519::keys::SecretShare,
+    //     secret_nonce: SigningNonces,
+    //     message: &[u8],
+    // ) -> SignatureShare;
 
-    /// The scheme must implement identifiable aborts, if signing session fails then the coordinator
-    /// can identify at least one malicious signer responsible for the failure.
+    /// Verify a signature share
     fn verify_signature_share(
         &self,
-        joint_key: K,
-        nonces: Vec<(usize, Nonce)>,
-        index: usize,
-        signature_share: Scalar<Public, Zero>,
-        message: Message,
+        joint_key: PK,
+        commitments: BTreeMap<Identifier, SigningCommitments>,
+        signer_identifier: Identifier,
+        signature_share: SignatureShare,
+        message: &[u8],
     ) -> bool;
 
-    /// The scheme must implement some way for coordinator to combine signature shares.
+    /// Combine signature shares into a final signature
     fn combine_signature_shares(
         &self,
-        joint_key: K,
-        nonces: Vec<(usize, Nonce)>,
-        signature_shares: Vec<Scalar<Public, Zero>>,
-        message: Message,
+        joint_key: PK,
+        commitments: BTreeMap<Identifier, SigningCommitments>,
+        signature_shares: BTreeMap<Identifier, SignatureShare>,
+        message: &[u8],
     ) -> Signature;
 }

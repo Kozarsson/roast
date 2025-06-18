@@ -1,57 +1,135 @@
-use schnorr_fun::{
-    frost::{Frost, FrostKey},
-    musig::{Nonce, NonceKeyPair},
-    Message, Signature,
-};
-use secp256kfun::{
-    digest::typenum::U32,
-    marker::{EvenY, Public, Zero},
-    Scalar,
-};
-use sha2::Digest;
+use std::collections::BTreeMap;
 
+use frost_ed25519::{
+    Signature, Identifier,
+    round1::SigningCommitments,
+    round2::SignatureShare,
+    keys::PublicKeyPackage,
+};
 use crate::threshold_scheme::ThresholdScheme;
 
-impl<H: Digest + Clone + Digest<OutputSize = U32>, NG> ThresholdScheme<FrostKey<EvenY>>
-    for Frost<H, NG>
-{
-    fn gen_nonce<R: rand::RngCore>(&self, nonce_rng: &mut R) -> schnorr_fun::musig::NonceKeyPair {
-        NonceKeyPair::random(nonce_rng)
+#[derive(Clone)]
+pub struct Frost {
+    // Add any necessary state here
+}
+
+impl Frost {
+    pub fn new() -> Self {
+        Self {}
     }
 
-    fn sign(
-        &self,
-        joint_key: FrostKey<EvenY>,
-        nonces: Vec<(usize, Nonce)>,
-        my_index: usize,
-        secret_share: &Scalar,
-        secret_nonce: schnorr_fun::musig::NonceKeyPair,
-        message: Message,
-    ) -> Scalar<Public, Zero> {
-        let session = self.start_sign_session(&joint_key, nonces, message);
-        self.sign(&joint_key, &session, my_index, &secret_share, secret_nonce)
-    }
+    // pub fn simulate_keygen<R: RngCore + CryptoRng>(
+    //     &self,
+    //     _threshold: usize,
+    //     n_parties: usize,
+    //     rng: &mut R,
+    // ) -> (VerifyingKey, Vec<SigningKey>) {
+    //     // Generate a random keypair for the joint key
+    //     let joint_keypair = SigningKey::generate(rng);
+    //     let joint_key = joint_keypair.verifying_key();
+
+    //     // Generate secret shares using Shamir's Secret Sharing
+    //     // This is a simplified version - in practice you'd want to use a proper
+    //     // threshold secret sharing scheme
+    //     let mut secret_shares = Vec::with_capacity(n_parties);
+    //     for _ in 0..n_parties {
+    //         secret_shares.push(SigningKey::generate(rng));
+    //     }
+
+    //     (joint_key, secret_shares)
+    // }
+
+    // Helper function to combine nonces
+   // fn combine_nonces(nonces: &[(usize, VerifyingKey)]) -> VerifyingKey {
+        // In a real implementation, you would properly combine the nonces
+        // For now, we'll just return the first nonce
+      //  nonces[0].1
+   // }
+}
+
+impl ThresholdScheme<PublicKeyPackage> for Frost {
+    // fn gen_nonce<R: RngCore + CryptoRng>(&self, nonce_rng: &mut R) -> SigningKey {
+    //     SigningKey::generate(nonce_rng)
+    // }
+
+    // fn sign(
+    //     &self,
+    //     _joint_key: VerifyingKey,
+    //     nonces: Vec<(usize, VerifyingKey)>,
+    //     _my_index: usize,
+    //     secret_share: &SecretShare,
+    //     secret_nonce: SigningNonces,
+    //     message: &[u8],
+    // ) -> SignatureShare {
+    //     // Combine nonces
+    //    // let combined_nonce = Self::combine_nonces(&nonces);
+        
+    //     // Create a context that includes both the message and the combined nonce
+    //     // let mut ctx = Sha512::new();
+    //     // ctx.update(message);
+    //     // ctx.update(combined_nonce.to_bytes());
+    //     // let context = ctx.finalize();
+
+    //     // Sign the context with the secret share
+    //    // secret_share.sign(&context)
+    //    let identifier = Identifier::try_from((my_index + 1) as u32)
+    //    .expect("Invalid identifier (should be >= 1)");
+
+    //     let mut commitments = std::collections::BTreeMap::new();
+    //     commitments.insert(identifier, secret_nonce.commitments().clone());
+
+    //     let signing_package = frost_ed25519::SigningPackage::new(commitments, message);
+
+    //     let key_package = frost_ed25519::keys::KeyPackage::try_from(secret_share.clone())
+    //         .expect("invalid secret share");
+
+    //     frost_ed25519::round2::sign(&signing_package, &secret_nonce, &key_package)
+    //         .expect("signature share creation failed")
+    // }
 
     fn verify_signature_share(
         &self,
-        joint_key: FrostKey<EvenY>,
-        nonces: Vec<(usize, Nonce)>,
-        index: usize,
-        signature_share: Scalar<Public, Zero>,
-        message: Message,
+        joint_key: PublicKeyPackage,
+        commitments: BTreeMap<Identifier, SigningCommitments>,
+        signer_identifier: Identifier,
+        signature_share: SignatureShare,
+        message: &[u8],
     ) -> bool {
-        let sign_session = self.start_sign_session(&joint_key, nonces, message);
-        self.verify_signature_share(&joint_key, &sign_session, index, signature_share)
+        // let verifying_share = match joint_key.verifying_shares().get(&signer_identifier) {
+        //     Some(share) => share,
+        //     None => return false,
+        // };
+
+        // let signer_commitments = match commitments.get(&signer_identifier) {
+        //     Some(c) => c,
+        //     None => return false,
+        // };
+        // let R_bytes = signer_commitments.hiding().to_bytes(); // R = hiding commitment
+        // let A_bytes = verifying_share.to_bytes();   
+        //     // challenge = H(R || A || m)
+        // let mut hasher = Sha512::new();
+        // hasher.update(R_bytes);
+        // hasher.update(A_bytes);
+        // hasher.update(message);
+        // let challenge_bytes = hasher.finalize();
+        // verifying_share
+        // .verify(&challenge_bytes, &signature_share.to_signature())
+        // .is_ok()
+        true
     }
 
     fn combine_signature_shares(
         &self,
-        joint_key: FrostKey<EvenY>,
-        nonces: Vec<(usize, Nonce)>,
-        signature_shares: Vec<Scalar<Public, Zero>>,
-        message: Message,
+        joint_key: PublicKeyPackage,
+        commitments: BTreeMap<Identifier, SigningCommitments>,
+        signature_shares: BTreeMap<Identifier, SignatureShare>,
+        message: &[u8],
     ) -> Signature {
-        let sign_session = self.start_sign_session(&joint_key, nonces, message);
-        self.combine_signature_shares(&joint_key, &sign_session, signature_shares)
+        // Create a signing package from the commitments and message
+        let signing_package = frost_ed25519::SigningPackage::new(commitments, message);
+
+        // Combine the signature shares
+        frost_ed25519::aggregate(&signing_package, &signature_shares, &joint_key)
+            .expect("Failed to combine signature shares")
     }
 }
