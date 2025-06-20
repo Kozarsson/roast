@@ -121,10 +121,10 @@ impl<'a, S: ThresholdScheme<K>, K: Clone> Coordinator<'a, S, K> {
         new_commitment: SigningCommitments,
     ) -> Result<RoastResponse, RoastError> {
         let mut roast_state = self.state.lock().expect("got lock");
-        // dbg!(&roast_state);
+        // // dbg!(&roast_state);
 
         if roast_state.malicious_signers.contains(&index) {
-           // println!("Malicious signer tried to send signature! {}", index);
+           // // println!("Malicious signer tried to send signature! {}", index);
             return Ok(RoastResponse {
                 recipients: vec![index],
                 combined_signature: None,
@@ -133,7 +133,7 @@ impl<'a, S: ThresholdScheme<K>, K: Clone> Coordinator<'a, S, K> {
         }
 
         if roast_state.responsive_signers.contains(&index) {
-           // println!(
+           // // println!(
                // "Unsolicited reply from signer {}, marking malicious.",
                 //index
            // );
@@ -154,10 +154,10 @@ impl<'a, S: ThresholdScheme<K>, K: Clone> Coordinator<'a, S, K> {
         // If this is not the inital message from S_i
         match roast_state.signer_session_map.get(&index) {
             Some(session_id) => {
-                println!(
-                    "Party {:?} sent signature for session {}",
-                    index, session_id
-                );
+                // // println!(
+                //     "Party {:?} sent signature for session {}",
+                //     index, session_id
+                // );
                 let nonces = {
                     let roast_session = roast_state
                         .sessions
@@ -175,7 +175,7 @@ impl<'a, S: ThresholdScheme<K>, K: Clone> Coordinator<'a, S, K> {
                     signature_share.unwrap().clone(),
                     roast_state.message,
                 ) {
-                    println!("Party {:?} sent invalid signature, marking as malicious.", index);
+                    // // println!("Party {:?} sent invalid signature, marking as malicious.", index);
                     roast_state.malicious_signers.insert(index);
                     if roast_state.malicious_signers.len() > self.n_signers - self.threshold {
                         return Err(RoastError::TooFewHonest);
@@ -200,12 +200,12 @@ impl<'a, S: ThresholdScheme<K>, K: Clone> Coordinator<'a, S, K> {
                 roast_session
                     .sig_shares
                     .insert(index,signature_share.expect("party provided None signature share"));
-                println!("New signature from party {:?}", index);
+                // // println!("New signature from party {:?}", index);
 
                 // if we have t-of-n, combine!
                 if roast_session.sig_shares.len() >= self.threshold {
-                    println!("We have the threshold number of signatures, combining!");
-                    dbg!(&roast_session.sig_shares);
+                    // // println!("We have the threshold number of signatures, combining!");
+                    // dbg!(&roast_session.sig_shares);
                     let signature = self.threshold_scheme.combine_signature_shares(
                         self.pubkey_package.clone(),
                         nonces.clone(),
@@ -230,13 +230,13 @@ impl<'a, S: ThresholdScheme<K>, K: Clone> Coordinator<'a, S, K> {
         roast_state.latest_commitments.insert(index, new_commitment);
 
         // Mark S_i as responsive
-        println!("Marked {:?} as responsive", index.clone());
+        // // println!("Marked {:?} as responsive", index.clone());
         roast_state.responsive_signers.insert(index);
 
         // if we now have t responsive signers:
         if roast_state.responsive_signers.len() >= self.threshold {
-            println!("We now have threshold number of responsive signers!");
-            dbg!(&roast_state.responsive_signers);
+            // // println!("We now have threshold number of responsive signers!");
+            // dbg!(&roast_state.responsive_signers);
             roast_state.session_counter += 1;
 
             // Look up the nonces

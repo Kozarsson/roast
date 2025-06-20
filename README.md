@@ -62,7 +62,7 @@ let sign_session_nonces = response2.nonce_set.expect("roast responded with nonce
 // and responds to ROAST with a signature share.
 let (sig_share2, nonce2) = signer2.sign(&mut rng, sign_session_nonces.clone());
 let response = roast.receive(1, Some(sig_share2), nonce2).unwrap();
-dbg!(
+// dbg!(
 &response.combined_signature.is_some(),
 &response.nonce_set.is_some()
 );
@@ -72,7 +72,7 @@ assert!(response.combined_signature.is_none());
 let (sig_share1, nonce1) = signer1.sign(&mut rng, sign_session_nonces);
 
 let response = roast.receive(0, Some(sig_share1), nonce1).unwrap();
-dbg!(
+// dbg!(
 &response.combined_signature.is_some(),
 &response.nonce_set.is_some()
 );
@@ -80,7 +80,7 @@ assert!(response.combined_signature.is_some());
 
 // Once the threshold number of signature shares have been received,
 // ROAST combines the signature shares into the aggregate signature
-dbg!(response.combined_signature);
+// dbg!(response.combined_signature);
 ```
 
 ## ROAST Paper Notes

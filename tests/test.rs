@@ -2,7 +2,6 @@
 mod tests {
     // Import necessary types and modules.
     use std::collections::BTreeMap; // BTreeMap is a sorted map, useful for managing signers and commitments by their identifiers.
-    use std::time::Instant; // Used for timing operations, like key generation.
 
     use frost_ed25519::round1::SigningCommitments; // Represents the nonces (commitments) a signer creates in round 1.
     use frost_ed25519::Identifier; // A unique identifier for each participant in the FROST protocol.
@@ -34,7 +33,7 @@ mod tests {
             &mut rng,                                     // The random number generator.
         )
         .unwrap(); // Unwrap the result, panicking if key generation fails.
-        println!("key generated");
+        // println!("key generated");
 
         // Define the message that the group will sign.
         let message = b"test message";
@@ -99,7 +98,7 @@ mod tests {
 
             // The signer uses the nonce set from the coordinator to generate their partial signature.
             let (sig_share, new_nonce) = signer.sign(&mut rng, sign_session_nonces.clone());
-            println!("make partial sig {:?}", id); // Log that a partial signature was created.
+            // println!("make partial sig {:?}", id); // Log that a partial signature was created.
                                                    // The signer sends their partial signature (`sig_share`) and a new commitment (`new_nonce`) for a potential future round to the coordinator.
             let response = roast.receive(*id, Some(sig_share), new_nonce).unwrap();
 
