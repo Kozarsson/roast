@@ -6,6 +6,8 @@ use frost_ed25519::{
     round2::SignatureShare,
     keys::PublicKeyPackage,
 };
+
+use frost_core;
 use crate::threshold_scheme::ThresholdScheme;
 
 #[derive(Clone)]
@@ -95,27 +97,10 @@ impl ThresholdScheme<PublicKeyPackage> for Frost {
         signature_share: SignatureShare,
         message: &[u8],
     ) -> bool {
-        // let verifying_share = match joint_key.verifying_shares().get(&signer_identifier) {
-        //     Some(share) => share,
-        //     None => return false,
-        // };
-
-        // let signer_commitments = match commitments.get(&signer_identifier) {
-        //     Some(c) => c,
-        //     None => return false,
-        // };
-        // let R_bytes = signer_commitments.hiding().to_bytes(); // R = hiding commitment
-        // let A_bytes = verifying_share.to_bytes();   
-        //     // challenge = H(R || A || m)
-        // let mut hasher = Sha512::new();
-        // hasher.update(R_bytes);
-        // hasher.update(A_bytes);
-        // hasher.update(message);
-        // let challenge_bytes = hasher.finalize();
-        // verifying_share
-        // .verify(&challenge_bytes, &signature_share.to_signature())
-        // .is_ok()
-        true
+        let signing_package = frost_ed25519::SigningPackage::new(commitments, message);
+        let verifying_key = joint_key.verifying_key();
+        let verifying_share = joint_key.verifying_shares().get(&signer_identifier).unwrap();
+        frost_core::verify_signature_share(signer_identifier,&verifying_share,&signature_share,&signing_package,&verifying_key).is_ok()
     }
 
     fn combine_signature_shares(
