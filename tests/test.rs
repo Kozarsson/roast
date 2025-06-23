@@ -1,123 +1,144 @@
 #[cfg(feature = "frost")]
 mod tests {
-    // Import necessary types and modules.
-    use std::collections::BTreeMap; // BTreeMap is a sorted map, useful for managing signers and commitments by their identifiers.
+    use std::collections::{BTreeMap,HashMap};
+    use std:: sync ::Arc;
+    use frost_ed25519::SigningPackage;
+    use frost_ed25519::keys::IdentifierList;
+    use rand::rngs::OsRng;  
+    use rand::seq::SliceRandom;
+    use roast::coordinator::RoastResponse;
+    use roast::coordinator::{Coordinator, Req, Resp};
+    use tokio::{sync::mpsc, task};
 
-    use frost_ed25519::round1::SigningCommitments; // Represents the nonces (commitments) a signer creates in round 1.
-    use frost_ed25519::Identifier; // A unique identifier for each participant in the FROST protocol.
-    use frost_ed25519::Signature; // The final, aggregated signature object.
+    use frost_ed25519::round1::SigningCommitments;
+    use frost_ed25519::Identifier;
+    use frost_ed25519::Signature;
+    use frost_ed25519::round2::SignatureShare;
+    use frost_ed25519::Ed25519Sha512;
+    use frost_ed25519::Ed25519ScalarField;
+    use frost_ed25519::Field;
 
-    use roast::coordinator; // The central coordinator module for the ROAST protocol.
-    use roast::frost::Frost; // A wrapper or adapter for the underlying FROST implementation.
-    use roast::signer; // The signer logic module for the ROAST protocol.
-    use roast::signer::RoastSigner; // The state machine for a single participant in ROAST.
+    use roast::coordinator;
+    use roast::signer;
+    use roast::frost::Frost;
+    use roast::signer::RoastSigner;
+
+    async fn async_t_of_n_sequential(threshold: u16, n_parties: u16, n_malicious: u16) {
+        let message = b"test message";
+    
+        let mut rng = OsRng;
+        let frost = Frost::new();
+        let (shares, pubkey_package) = frost_ed25519::keys::generate_with_dealer(
+            n_parties, threshold, IdentifierList::Default, &mut rng,
+        ).unwrap();
+    
+        // start Coordinator 
+        let coord = Arc::new(Coordinator::new(frost.clone(), pubkey_package.clone(), message, threshold as usize, n_parties as usize));
+        let (req_tx, req_rx) = mpsc::unbounded_channel::<Req>();
+        let mut resp_txs: HashMap<Identifier, mpsc::UnboundedSender<Resp>> = HashMap::new();
+        let mut resp_rxs: HashMap<Identifier, mpsc::UnboundedReceiver<Resp>> = HashMap::new();
+        for ((id, _), _) in shares.iter().zip(0..) {
+            let (tx, rx) = mpsc::unbounded_channel::<Resp>();
+            resp_txs.insert(*id, tx);
+            resp_rxs.insert(*id, rx);
+        }
+        let resp_txs = Arc::new(resp_txs);
+        let (term_tx, _) = tokio::sync::broadcast::channel::<Signature>(1);
+    
+        // serve loop for coordinator
+        {
+            let coord = coord.clone();
+            let resp_txs = resp_txs.clone();
+            let term_tx = term_tx.clone();
+            task::spawn(async move {
+                coord.serve(req_rx, resp_txs,term_tx).await;
+            });
+        }
+    
+        // Prepare Signer instance and initial commitment
+        let mut signer_map = BTreeMap::new();
+        let mut commitments = BTreeMap::new();
+        let mut mask = vec![true; n_malicious as usize];
+        mask.append(&mut vec![false; (n_parties - n_malicious) as usize]);
+        mask.shuffle(&mut rng);
+    
+        for ((id, secret), byz) in shares.into_iter().zip(mask) {
+            let (signer, commit) = RoastSigner::new(&mut rng, frost.clone(), pubkey_package.clone(), id, secret, message);
+            signer_map.insert(id, (signer, byz));
+            commitments.insert(id, commit);
+        }
+    
+        //Start each signer in parallel
+        let mut handles = Vec::new();
+        for (id, (mut signer, is_byz)) in signer_map {
+            let req_tx = req_tx.clone();
+            let mut resp_rx = resp_rxs.remove(&id).unwrap();
+            let pubkey = pubkey_package.clone();
+            let msg = message.clone();
+            let initial_commit = commitments[&id].clone();
+            let term_tx_copy = term_tx.clone();
+            let handle = task::spawn(async move {
+
+                let mut term_rx = term_tx_copy.subscribe();
+                req_tx.send((id, None, initial_commit)).unwrap();
+                
+                let mut pkg: SigningPackage = loop {
+                    if let Some(Resp { recipients, nonce_set: Some(ns), .. }) = resp_rx.recv().await {
+                        if recipients.contains(&id) {
+                            break ns;
+                        }
+                    }
+                };
+    
+                //  sigining session
+                loop {
+                    println!("make partial signature {:?}",&id);
+                    let (share, new_commit) = signer.sign(&mut rng, pkg.clone());
+                    let share_opt = Some(share.clone());
+                    if is_byz{
+                       // malicious behavior
+                        type C = Ed25519Sha512; 
+                        let random_scalar =
+                            <<frost_ed25519::Ed25519Sha512 as frost_ed25519::Ciphersuite>::Group as frost_ed25519::Group>::Field::random(
+                            &mut rng,
+                        );
+                        let scalar_bytes = Ed25519ScalarField::serialize(&random_scalar);
+                        let sig_share = SignatureShare::deserialize(&scalar_bytes)
+                        .expect("serialization/deserialization should succeed");
+                        req_tx.send((id, Some(sig_share), new_commit)).unwrap();
+                    }else{
+                        req_tx.send((id, share_opt, new_commit)).unwrap();
+                    }
+                    tokio::select! {
+                        Ok(sig) = term_rx.recv() => {
+                            assert!(pubkey.verifying_key().verify(&msg, &sig).is_ok());
+                                break;
+                            }
+                        maybe_resp = resp_rx.recv() => {
+                            if let Some(Resp { recipients, nonce_set: Some(ns), combined_signature: _ , .. }) = maybe_resp {
+                                    if recipients.contains(&id) {
+                                        pkg = ns;
+                                        continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            handles.push(handle);
+        }
+    
+        for h in handles {
+            h.await.unwrap();
+        }
+        println!("All sessions completed successfully");
+    }
+    
 
     #[test]
-    fn test_t_of_n_basic() {
-        // Initialize the FROST protocol helper.
-        let frost = Frost::new();
-        // Initialize a random number generator.
-        let mut rng = old_rand::thread_rng();
-
-        // Define the total number of participants in the signing group.
-        let n = 151;
-        // Define the threshold, i.e., the minimum number of participants required to create a signature.
-        let t = 101;
-
-        // Simulate a trusted dealer generating keys for a t-of-n FROST instance.
-        // This creates the secret shares for each participant and the public key package for the group.
-        let (shares, pubkey_package) = frost_ed25519::keys::generate_with_dealer(
-            n,                                            // Total number of participants.
-            t,                                            // The threshold.
-            frost_ed25519::keys::IdentifierList::Default, // Use default identifiers for participants (1, 2, 3, ...).
-            &mut rng,                                     // The random number generator.
-        )
-        .unwrap(); // Unwrap the result, panicking if key generation fails.
-        // println!("key generated");
-
-        // Define the message that the group will sign.
-        let message = b"test message";
-        // Initialize the ROAST coordinator. It knows the group's public key, the message to be signed, and the t-of-n parameters.
-        let roast =
-            coordinator::Coordinator::new(frost, pubkey_package.clone(), message, t as usize, n as usize);
-
-        // Create a map to hold the state for each signer. The key is the signer's Identifier.
-        let mut signers: BTreeMap<Identifier, RoastSigner<_, _>> = BTreeMap::new();
-        // Create a map to hold the initial signing commitments (nonces) from each signer.
-        let mut commitments: BTreeMap<Identifier, SigningCommitments> = BTreeMap::new();
-
-        // Iterate over the secret shares generated by the dealer.
-        for (identifier, secret_share) in shares {
-            // For each participant, create a new RoastSigner instance and their initial commitment.
-            let (signer, commitment) = signer::RoastSigner::new(
-                &mut rng,               // The random number generator.
-                Frost::new(),           // The FROST protocol helper.
-                pubkey_package.clone(), // The group's public key package.
-                identifier,             // The unique identifier for this participant.
-                secret_share,           // The secret key share for this participant.
-                message,                // The message to be signed.
-            );
-            // Store the signer's state.
-            signers.insert(identifier, signer);
-            // Store the signer's initial commitment.
-            commitments.insert(identifier, commitment);
-        }
-
-        // This map is not actually used in this implementation, but would typically be for tracking nonces.
-        let mut received_nonces: BTreeMap<Identifier, SigningCommitments> = BTreeMap::new();
-        // This will hold the set of nonces broadcast by the coordinator once the threshold is met.
-        let mut nonce_response: Option<BTreeMap<Identifier, SigningCommitments>> = None;
-
-        // --- ROUND 1: Commitment Exchange ---
-        // Simulate each signer sending their initial commitment to the coordinator.
-        for (id, commitment) in &commitments {
-            // The coordinator receives the commitment. `None` is passed for the signature share because this is the first round.
-            let response = roast.receive(*id, None, commitment.clone()).unwrap();
-
-            // The coordinator's response will include a `nonce_set` once it has received `t` commitments.
-            if let Some(nonce_set) = response.nonce_set.clone() {
-                // If the nonce_set is present, it means the threshold has been met. Store it.
-                nonce_response = Some(nonce_set);
-            }
-        }
-
-        // Ensure that the coordinator did indeed broadcast a nonce set. Panics if not enough commitments were received.
-        let sign_session_nonces = nonce_response.expect("Did not receive enough nonces");
-
-        // This will hold the final aggregated signature once it's created.
-        let mut final_signature: Option<Signature> = None;
-
-        // --- ROUND 2: Signing ---
-        // Simulate each of the `t` responsive signers creating and sending their partial signatures.
-        for (id, signer) in &mut signers {
-            // Check if the current signer was part of the group that the coordinator selected for this signing session.
-            if !sign_session_nonces.iter().any(|(i, _)| i == id) {
-                // If not, this signer was not in the first `t` to respond, so they skip this round.
-                continue;
-            }
-
-            // The signer uses the nonce set from the coordinator to generate their partial signature.
-            let (sig_share, new_nonce) = signer.sign(&mut rng, sign_session_nonces.clone());
-            // println!("make partial sig {:?}", id); // Log that a partial signature was created.
-                                                   // The signer sends their partial signature (`sig_share`) and a new commitment (`new_nonce`) for a potential future round to the coordinator.
-            let response = roast.receive(*id, Some(sig_share), new_nonce).unwrap();
-
-            // The coordinator's response will include the final `combined_signature` once it has `t` partial signatures.
-            if let Some(sig) = response.combined_signature {
-                // If the final signature is present, store it.
-                final_signature = Some(sig);
-                // The signature is complete, so we can stop the process.
-                break;
-            }
-        }
-
-        // --- VERIFICATION ---
-        // Ensure that a final signature was actually created. Panics if the signing process failed.
-        let final_sig = final_signature.expect("should have combined signature");
-        // Verify that the final, aggregated signature is valid for the original message using the group's public key.
-        assert!(pubkey_package
-            .verifying_key()
-            .verify(message, &final_sig)
-            .is_ok());
+    fn roast_7_of_10_3_malicious() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async_t_of_n_sequential(7, 10, 3));
     }
-}
+
+ }
